@@ -4,6 +4,9 @@ import { ToolRegistry } from '../tools/tool.registry';
 import { Tool } from '../tools/tool.interface';
 import { Plan, PlanSchema } from './plan.interface';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import { AgentProfile } from './agent-profile.interface';
+import { MemoryService } from './memory.service';
+import { ChatCompletionMessageParam } from 'litellm/types';
 
 @Injectable()
 export class PlannerService {
@@ -12,23 +15,39 @@ export class PlannerService {
   constructor(
     private readonly llmService: LlmService,
     private readonly toolRegistry: ToolRegistry,
+    private readonly memoryService: MemoryService,
   ) {}
 
   /**
    * Creates a structured plan to achieve a given objective.
    * @param objective The user's high-level goal.
+   * @param profile The profile of the agent that will execute the plan.
+   * @param taskId The ID of the current task, used to retrieve conversation history.
    * @returns A promise that resolves to a structured plan.
    */
-  async createPlan(objective: string): Promise<Plan> {
+  async createPlan(
+    objective: string,
+    profile: AgentProfile,
+    taskId: string,
+  ): Promise<Plan> {
     const tools = this.toolRegistry.getAllTools();
-    const systemPrompt = this.buildSystemPrompt(tools);
+    const systemPrompt = this.buildSystemPrompt(tools, profile);
+    const history = this.memoryService.getHistory(taskId);
 
-    this.logger.log(`Generating plan for objective: "${objective}"`);
+    // Convert our memory format to the format LiteLLM expects.
+    const messages: ChatCompletionMessageParam[] = history.map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+    }));
 
-    const responseJson = await this.llmService.completion([
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: `The user's objective is: "${objective}"` },
-    ]);
+    // Add the system prompt as the first message.
+    messages.unshift({ role: 'system', content: systemPrompt });
+
+    this.logger.log(
+      `Generating plan for objective: "${objective}" with ${history.length} history messages.`,
+    );
+
+    const responseJson = await this.llmService.completion(messages);
 
     this.logger.log('Received response from LLM, parsing and validating plan...');
     const plan = this.parseAndValidatePlan(responseJson);
@@ -60,9 +79,10 @@ export class PlannerService {
   /**
    * Builds the system prompt to guide the LLM in creating a plan.
    * @param tools A list of available tools.
+   * @param profile The profile of the agent.
    * @returns The system prompt string.
    */
-  private buildSystemPrompt(tools: Tool[]): string {
+  private buildSystemPrompt(tools: Tool[], profile: AgentProfile): string {
     const toolDefinitions = tools
       .map((tool) => {
         // Use zod-to-json-schema to get a JSON schema representation of the Zod schema
@@ -79,9 +99,11 @@ export class PlannerService {
       .join('');
 
     return `
-You are an expert AI agent orchestrator. Your task is to take a user's objective and create a step-by-step plan to achieve it using a set of available tools.
+${profile.role}
 
-You have access to the following tools:
+Your high-level goals are: ${profile.goals.join(', ')}.
+
+You have access to the following tools to achieve the user's objective:
 ${toolDefinitions}
 
 You must respond with a JSON object that strictly follows this schema:

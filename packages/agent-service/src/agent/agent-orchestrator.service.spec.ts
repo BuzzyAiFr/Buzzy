@@ -3,6 +3,9 @@ import { AgentOrchestratorService } from './agent-orchestrator.service';
 import { PlannerService } from './planner.service';
 import { ExecutorService } from './executor.service';
 import { Plan } from './plan.interface';
+import { AgentProfileRepository } from './agent-profile.repository';
+import { MemoryService } from './memory.service';
+import { AgentProfile } from './agent-profile.interface';
 
 const mockPlannerService = {
   createPlan: jest.fn(),
@@ -10,6 +13,22 @@ const mockPlannerService = {
 
 const mockExecutorService = {
   executePlan: jest.fn(),
+};
+
+const mockProfileRepo = {
+  findById: jest.fn(),
+};
+
+const mockMemoryService = {
+  startSession: jest.fn(),
+  addMessage: jest.fn(),
+};
+
+const mockProfile: AgentProfile = {
+  id: 'test-agent',
+  name: 'Test Agent',
+  role: 'You are a test agent.',
+  goals: ['test'],
 };
 
 describe('AgentOrchestratorService', () => {
@@ -21,6 +40,8 @@ describe('AgentOrchestratorService', () => {
         AgentOrchestratorService,
         { provide: PlannerService, useValue: mockPlannerService },
         { provide: ExecutorService, useValue: mockExecutorService },
+        { provide: AgentProfileRepository, useValue: mockProfileRepo },
+        { provide: MemoryService, useValue: mockMemoryService },
       ],
     }).compile();
 
@@ -32,28 +53,37 @@ describe('AgentOrchestratorService', () => {
     expect(service).toBeDefined();
   });
 
-  it('should call planner and then executor to execute a task', async () => {
+  it('should call all services in order to execute a task', async () => {
     const objective = 'test objective';
+    const agentId = 'test-agent';
     const mockPlan: Plan = {
       steps: [{ tool: 'test.tool', inputs: {}, reasoning: 'test' }],
     };
     const mockResults = [{ result: 'success' }];
 
+    // Setup mocks
+    mockProfileRepo.findById.mockReturnValue(mockProfile);
     mockPlannerService.createPlan.mockResolvedValue(mockPlan);
     mockExecutorService.executePlan.mockResolvedValue(mockResults);
 
-    const finalResult = await service.executeTask(objective);
+    const finalResult = await service.executeTask(objective, agentId);
 
-    // Verify that the planner was called first with the objective
-    expect(mockPlannerService.createPlan).toHaveBeenCalledWith(objective);
-    // Verify that the executor was called next with the plan from the planner
+    // Verify calls
+    expect(mockMemoryService.startSession).toHaveBeenCalledTimes(1);
+    expect(mockProfileRepo.findById).toHaveBeenCalledWith(agentId);
+    expect(mockPlannerService.createPlan).toHaveBeenCalledWith(
+      objective,
+      mockProfile,
+      expect.any(String), // taskId
+    );
     expect(mockExecutorService.executePlan).toHaveBeenCalledWith(mockPlan);
+    // Verify that messages were added to memory
+    expect(mockMemoryService.addMessage).toHaveBeenCalledTimes(3);
 
     // Verify the final output structure
-    expect(finalResult).toEqual({
-      objective,
-      plan: mockPlan,
-      results: mockResults,
-    });
+    expect(finalResult).toHaveProperty('taskId');
+    expect(finalResult.agentProfile).toEqual(mockProfile);
+    expect(finalResult.plan).toEqual(mockPlan);
+    expect(finalResult.results).toEqual(mockResults);
   });
 });
