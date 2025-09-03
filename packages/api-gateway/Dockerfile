@@ -1,0 +1,37 @@
+# ---- Base Stage ----
+# Use a slim Node.js image as a base
+FROM node:20-slim AS base
+WORKDIR /app
+# Install pnpm globally
+RUN npm install -g pnpm
+
+# ---- Dependencies Stage ----
+# This stage is dedicated to installing dependencies to leverage Docker caching
+FROM base AS dependencies
+# Copy dependency definition files from the monorepo root
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# Copy the package.json of all packages in the workspace
+COPY packages/ packages/
+# Install only the dependencies needed for the 'api-gateway' and its dependents
+RUN pnpm install --frozen-lockfile --filter api-gateway...
+
+# ---- Build Stage ----
+# This stage is dedicated to building the application
+FROM base AS build
+# Copy dependencies from the previous stage
+COPY --from=dependencies /app /app
+# Copy the source code for the api-gateway
+COPY packages/api-gateway/ ./packages/api-gateway/
+# Build the api-gateway application
+RUN pnpm --filter api-gateway run build
+
+# ---- Production Stage ----
+# This is the final, minimal image
+FROM node:20-slim AS production
+WORKDIR /app
+# Copy the built application and the necessary node_modules from the build stage
+COPY --from=build /app /app
+# Expose the port the application will run on
+EXPOSE 3001
+# Define the command to run the application
+CMD ["node", "packages/api-gateway/dist/main"]

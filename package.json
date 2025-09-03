@@ -1,0 +1,17 @@
+{
+  "name": "buzzy-framework",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A next-generation framework for autonomous AI agent swarms.",
+  "scripts": {
+    "dev": "pnpm --filter \"./packages/**\" --parallel run dev"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "autonomous",
+    "framework",
+    "multi-agent"
+  ],
+  "author": "Buzzy AI"
+}
