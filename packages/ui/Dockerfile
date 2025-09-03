@@ -29,6 +29,8 @@ RUN pnpm --filter ui run build
 # This is the final, minimal image
 FROM node:20-slim AS production
 WORKDIR /app
+# Install pnpm globally in production stage
+RUN npm install -g pnpm
 # Copy the built application and the necessary node_modules from the build stage
 COPY --from=build /app /app
 # Next.js listens on port 3000 by default, but we will map it to a different host port
